@@ -1,0 +1,235 @@
+// this script excludes search terms in a specific / multiple campaigns (search and standard shopping)
+// tip: set it to run hourly
+//
+// update 1.1 = now possible to exclude terms who do not contain a word in your list instead of only exclude the exact word when it's not in the list
+// update 2.0 = now it will excludes search terms in a list
+// update 2.1 = creates multiple lists if over 5.000 negatives
+// update 2.2 = checking only last 30 days
+//
+// by Floris de Schrijver
+// questions: floris@floboost.nl
+
+var EXACT_MATCH = false; // keep to false 
+var FILTER_BY_LABEL_OR_BY_NAME_PART = "Name"; // "Label" OR "Name" - leave this on Name since Label often doesn't work
+var CAMPAIGN_LABEL = "do not use me"; 
+
+var CAMPAIGN_NAME_PART = "branded shopping"; // name of your campaign to check ANd exclude in do not use | marks
+var SHARED_LIST_NAME = "All but Allowed Terms"; // your own list name
+
+var PERIOD = "LAST_30_DAYS"; // LAST_30_DAYS, TODAY, YESTERDAY, LAST_7_DAYS, LAST_14_DAYS, THIS_MONTH, LAST_MONTH 
+
+var TABLE = SpreadsheetApp.openByUrl("https://docs.google.com/spreadsheets/d/1dA7zXeBkXuvl4RrgQy46o9UKYQ37mx2hmsSO2bzP1O8/edit#gid=0"); // make a copy and do not forget to add misspelling
+var SHEET = TABLE.getSheetByName("List1");
+
+function main() {
+  var ok_terms = SHEET.getRange("A2:A"+SHEET.getLastRow()).getValues().flat();
+  var new_negatives = [];
+  var report;
+  
+  //checking if keywords were already added to the lists
+  var lists = AdsApp.negativeKeywordLists().withCondition("Name CONTAINS '"+SHARED_LIST_NAME+"'").get();
+  var already_added = [];
+  while (lists.hasNext()){
+    var list = lists.next();
+    var kws = list.negativeKeywords().get();
+    while (kws.hasNext()){
+      var kw = kws.next();
+      var kw_text = kw.getText();
+      //Logger.log(kw_text);
+      already_added.push(kw_text);
+    }
+  }
+  
+  //checking search
+  if (FILTER_BY_LABEL_OR_BY_NAME_PART == "Label"){
+    try {
+      var label = AdsApp.search("SELECT label.resource_name FROM label WHERE label.name = '"+CAMPAIGN_LABEL+"'").next().label.resourceName;
+      report = AdsApp.search("SELECT search_term_view.search_term, campaign.name FROM search_term_view WHERE campaign.advertising_channel_type = SEARCH AND campaign.labels CONTAINS ANY ('"+label+"') AND campaign.status = ENABLED AND segments.date DURING "+PERIOD+"");      
+    } catch (e) {}
+  } else if (FILTER_BY_LABEL_OR_BY_NAME_PART == "Name"){
+    report = AdsApp.search("SELECT search_term_view.search_term, campaign.name FROM search_term_view WHERE campaign.advertising_channel_type = SEARCH AND campaign.name REGEXP_MATCH '(?i).*"+CAMPAIGN_NAME_PART+".*' AND campaign.status = ENABLED AND segments.date DURING "+PERIOD+"");
+  }
+
+  while (report.hasNext()){
+    var row = report.next();
+    var term = row.searchTermView.searchTerm;
+    var campaign_name = row.campaign.name;
+    if (EXACT_MATCH){
+     if (ok_terms.indexOf(term) == -1 && already_added.indexOf(term) == -1){
+       if (new_negatives.indexOf("["+term+"]") == -1){
+         new_negatives.push("["+term+"]");
+       }
+     }
+    } else {
+      if (!contains_any(term, ok_terms) && already_added.indexOf(term) == -1){
+        if (ok_terms.indexOf("["+term+"]") == -1){
+          new_negatives.push("["+term+"]");
+        }
+      }
+    }
+  }
+
+  
+//shopping
+  if (FILTER_BY_LABEL_OR_BY_NAME_PART == "Label"){
+    try {
+      var label = AdsApp.search("SELECT label.resource_name FROM label WHERE label.name = '"+CAMPAIGN_LABEL+"'").next().label.resourceName;
+      report = AdsApp.search("SELECT search_term_view.search_term, campaign.name FROM search_term_view WHERE campaign.advertising_channel_type = SHOPPING AND campaign.labels CONTAINS ANY ('"+label+"') AND campaign.status = ENABLED AND segments.date DURING "+PERIOD+"");      
+    } catch (e) {}
+  } else if (FILTER_BY_LABEL_OR_BY_NAME_PART == "Name"){
+    report = AdsApp.search("SELECT search_term_view.search_term, campaign.name FROM search_term_view WHERE campaign.advertising_channel_type = SHOPPING AND campaign.name REGEXP_MATCH '(?i).*"+CAMPAIGN_NAME_PART+".*' AND campaign.status = ENABLED AND segments.date DURING "+PERIOD+"");
+  }
+
+  while (report.hasNext()){
+    var row = report.next();
+    var term = row.searchTermView.searchTerm;
+    var campaign_name = row.campaign.name;
+    if (EXACT_MATCH){
+     if (ok_terms.indexOf(term) == -1 && already_added.indexOf(term) == -1){
+       if (new_negatives.indexOf("["+term+"]") == -1){
+         new_negatives.push("["+term+"]");
+       }
+     }
+    } else {
+      if (!contains_any(term, ok_terms) && already_added.indexOf(term) == -1){
+        if (ok_terms.indexOf("["+term+"]") == -1){
+          new_negatives.push("["+term+"]");
+        }
+      }
+    }
+  }
+
+  
+  var check_base_list = AdsApp.negativeKeywordLists().withCondition("Name = '"+SHARED_LIST_NAME+"'").get().totalNumEntities();
+  var number_of_new = new_negatives.length;
+  var base_list;
+  var left;
+  if (check_base_list == 0) {
+    base_list = AdsApp.newNegativeKeywordListBuilder().withName(SHARED_LIST_NAME).build().getResult();
+  } else {
+    base_list = AdsApp.negativeKeywordLists().withCondition("Name = '"+SHARED_LIST_NAME+"'").get().next();
+    left = base_list.negativeKeywords().get().totalNumEntities();
+  }
+  //Logger.log(left);
+  Logger.log(number_of_new);
+  if (left == null && number_of_new <= 5000){
+    base_list.addNegativeKeywords(new_negatives);
+    var camps = AdsApp.campaigns().withCondition("campaign.name REGEXP_MATCH '(?).*"+CAMPAIGN_NAME_PART+".*'").get();
+    while (camps.hasNext()){
+      try {camps.next().addNegativeKeywordList(base_list)} catch (e) { Logger.log(e); };
+    }
+    var camps = AdsApp.shoppingCampaigns().withCondition("campaign.name REGEXP_MATCH '(?).*"+CAMPAIGN_NAME_PART+".*'").get();
+    while (camps.hasNext()){
+      try {camps.next().addNegativeKeywordList(base_list)} catch (e) { Logger.log(e); };
+    }
+  } else if (left == null && number_of_new > 5000) {
+    var chunk_size = 5000;
+    var list_number = 1;
+    for (var i = 0; i < new_negatives.length; i += chunk_size) {
+      var chunk = new_negatives.slice(i, i + chunk_size);
+      if (i == 0){
+        base_list.addNegativeKeywords(chunk);
+        var camps = AdsApp.campaigns().withCondition("campaign.name REGEXP_MATCH '(?i).*"+CAMPAIGN_NAME_PART+".*'").get();
+        while (camps.hasNext()){
+          try {camps.next().addNegativeKeywordList(base_list)} catch (e) { Logger.log(e); };
+        }
+        var camps = AdsApp.shoppingCampaigns().withCondition("campaign.name REGEXP_MATCH '(?i).*"+CAMPAIGN_NAME_PART+".*'").get();
+        while (camps.hasNext()){
+          try {camps.next().addNegativeKeywordList(base_list)} catch (e) { Logger.log(e); };
+        }
+      } else {
+        var new_list = AdsApp.newNegativeKeywordListBuilder().withName(SHARED_LIST_NAME+" "+list_number).build().getResult();
+        new_list.addNegativeKeywords(chunk);
+        var camps = AdsApp.campaigns().withCondition("campaign.name REGEXP_MATCH '(?i).*"+CAMPAIGN_NAME_PART+".*'").get();
+        while (camps.hasNext()){
+          try {camps.next().addNegativeKeywordList(new_list)} catch (e) { Logger.log(e); };
+        }
+        var camps = AdsApp.shoppingCampaigns().withCondition("campaign.name REGEXP_MATCH '(?i).*"+CAMPAIGN_NAME_PART+".*'").get();
+        while (camps.hasNext()){
+          try {camps.next().addNegativeKeywordList(new_list)} catch (e) { Logger.log(e); };
+        }
+        list_number++;
+      }
+    }
+  } else if (left != null){
+    var left_in_this = 5000 - left;
+    if (left_in_this > number_of_new){
+      base_list.addNegativeKeywords(new_negatives);
+      var camps = AdsApp.campaigns().withCondition("campaign.name REGEXP_MATCH '(?i).*"+CAMPAIGN_NAME_PART+".*'").get();
+      while (camps.hasNext()){
+        try {camps.next().addNegativeKeywordList(base_list)} catch (e) { Logger.log(e); };
+      }
+      var camps = AdsApp.shoppingCampaigns().withCondition("campaign.name REGEXP_MATCH '(?i).*"+CAMPAIGN_NAME_PART+".*'").get();
+      while (camps.hasNext()){
+        try {camps.next().addNegativeKeywordList(base_list)} catch (e) { Logger.log(e); };
+      }
+    } else {
+      var list_number = 1;
+      var chunk_size = 5000;
+      var new_list;
+      var already_created = true;
+      for (var i = 0; i < new_negatives.length; i += chunk_size) {
+        var chunk = new_negatives.slice(i, i + chunk_size);
+        if (AdsApp.negativeKeywordLists().withCondition("Name = '"+SHARED_LIST_NAME+" "+list_number+"'").get().totalNumEntities() == 0){
+          new_list = AdsApp.newNegativeKeywordListBuilder().withName(SHARED_LIST_NAME+" "+list_number).build().getResult();
+          already_created = false;
+        } else {
+          new_list = AdsApp.negativeKeywordLists().withCondition("Name = '"+SHARED_LIST_NAME+" "+list_number+"'").get().next();
+        }
+        //Logger.log(new_list.getName());
+        if (!already_created){
+          new_list.addNegativeKeywords(chunk);
+          var camps = AdsApp.campaigns().withCondition("campaign.name REGEXP_MATCH '(?i).*"+CAMPAIGN_NAME_PART+".*'").get();
+          while (camps.hasNext()){
+            try {camps.next().addNegativeKeywordList(new_list)} catch (e) { Logger.log(e); };
+          }
+          var camps = AdsApp.shoppingCampaigns().withCondition("campaign.name REGEXP_MATCH '(?i).*"+CAMPAIGN_NAME_PART+".*'").get();
+          while (camps.hasNext()){
+            try {camps.next().addNegativeKeywordList(new_list)} catch (e) { Logger.log(e); };
+          }
+          list_number++;        
+        } else {
+          //Logger.log(5000 - new_list.negativeKeywords().get().totalNumEntities())
+          if (5000 - new_list.negativeKeywords().get().totalNumEntities() < number_of_new){
+            var found = false;
+            while (!found){
+              list_number++;
+              if (AdsApp.negativeKeywordLists().withCondition("Name = '"+SHARED_LIST_NAME+" "+list_number+"'").get().totalNumEntities() == 0){
+                new_list = AdsApp.newNegativeKeywordListBuilder().withName(SHARED_LIST_NAME+" "+list_number).build().getResult();
+                already_created = false;
+              } else {
+                new_list = AdsApp.negativeKeywordLists().withCondition("Name = '"+SHARED_LIST_NAME+" "+list_number+"'").get().next();
+              }
+              
+              if (!already_created){
+                new_list.addNegativeKeywords(chunk);
+                var camps = AdsApp.campaigns().withCondition("campaign.name REGEXP_MATCH '(?i).*"+CAMPAIGN_NAME_PART+".*'").get();
+                while (camps.hasNext()){
+                  try {camps.next().addNegativeKeywordList(new_list)} catch (e) { Logger.log(e); };
+                }
+                var camps = AdsApp.shoppingCampaigns().withCondition("campaign.name REGEXP_MATCH '(?i).*"+CAMPAIGN_NAME_PART+".*'").get();
+                while (camps.hasNext()){
+                  try {camps.next().addNegativeKeywordList(new_list)} catch (e) { Logger.log(e); };
+                }
+              } else {
+                new_list.addNegativeKeywords(chunk);
+              }
+              found = true;
+            }
+       
+          }
+        }
+      }
+    }
+  }
+}
+  
+function contains_any(str, substrings) {
+  for (var i = 0; i < substrings.length; i++) {
+    var substring = substrings[i];
+    if (str.indexOf(substring) != - 1) {
+      return substring;
+    }
+ }
+ return null
+}
