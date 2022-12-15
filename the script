@@ -1,24 +1,21 @@
 // this script excludes search terms in a specific / multiple campaigns (search and standard shopping)
 // tip: set it to run hourly
-//
-// update 1.1 = now possible to exclude terms who do not contain a word in your list instead of only exclude the exact word when it's not in the list
-// update 2.0 = now it will excludes search terms in a list
-// update 2.1 = creates multiple lists if over 5.000 negatives
-// update 2.2 = checking only last 30 days
-//
+// 
+// version 3.0 > set minimum_clicks per query
 // by Floris de Schrijver
 // questions: floris@floboost.nl
 
-var EXACT_MATCH = false; // keep to false 
-var FILTER_BY_LABEL_OR_BY_NAME_PART = "Name"; // "Label" OR "Name" - leave this on Name since Label often doesn't work
-var CAMPAIGN_LABEL = "do not use me"; 
+var EXACT_MATCH = false; // true or false 
+var FILTER_BY_LABEL_OR_BY_NAME_PART = "Name"; // "Label" OR "Name" - leave this on Name
 
-var CAMPAIGN_NAME_PART = "branded shopping"; // name of your campaign to check ANd exclude in do not use | marks
+var CAMPAIGN_NAME_PART = "low-priority branded"; // part of the campaign name
 var SHARED_LIST_NAME = "All but Allowed Terms"; // your own list name
 
-var PERIOD = "LAST_30_DAYS"; // LAST_30_DAYS, TODAY, YESTERDAY, LAST_7_DAYS, LAST_14_DAYS, THIS_MONTH, LAST_MONTH 
+var PERIOD = "ALL_TIME"; // LAST_30_DAYS, TODAY, YESTERDAY, LAST_7_DAYS, LAST_14_DAYS, THIS_MONTH, LAST_MONTH 
 
-var TABLE = SpreadsheetApp.openByUrl("https://docs.google.com/spreadsheets/d/1dA7zXeBkXuvl4RrgQy46o9UKYQ37mx2hmsSO2bzP1O8/edit#gid=0"); // make a copy and do not forget to add misspelling
+var MINIMUM_CLICKS = 1; // minimum clicks per unique query
+
+var TABLE = SpreadsheetApp.openByUrl("https://docs.google.com/spreadsheets/d/1dA7zXeBkXuvl4RrgQy46o9UKYQ37mx2hmsSO2bzP1O8/copy"); // make a copy and do not forget to add misspelling
 var SHEET = TABLE.getSheetByName("List1");
 
 function main() {
@@ -44,10 +41,10 @@ function main() {
   if (FILTER_BY_LABEL_OR_BY_NAME_PART == "Label"){
     try {
       var label = AdsApp.search("SELECT label.resource_name FROM label WHERE label.name = '"+CAMPAIGN_LABEL+"'").next().label.resourceName;
-      report = AdsApp.search("SELECT search_term_view.search_term, campaign.name FROM search_term_view WHERE campaign.advertising_channel_type = SEARCH AND campaign.labels CONTAINS ANY ('"+label+"') AND campaign.status = ENABLED AND segments.date DURING "+PERIOD+"");      
+      report = AdsApp.search("SELECT search_term_view.search_term, campaign.name FROM search_term_view WHERE campaign.advertising_channel_type = SEARCH AND campaign.labels CONTAINS ANY ('"+label+"') AND campaign.status = ENABLED AND metrics.clicks >= "+MINIMUM_CLICKS+"");      
     } catch (e) {}
   } else if (FILTER_BY_LABEL_OR_BY_NAME_PART == "Name"){
-    report = AdsApp.search("SELECT search_term_view.search_term, campaign.name FROM search_term_view WHERE campaign.advertising_channel_type = SEARCH AND campaign.name REGEXP_MATCH '(?i).*"+CAMPAIGN_NAME_PART+".*' AND campaign.status = ENABLED AND segments.date DURING "+PERIOD+"");
+    report = AdsApp.search("SELECT search_term_view.search_term, campaign.name FROM search_term_view WHERE campaign.advertising_channel_type = SEARCH AND campaign.name REGEXP_MATCH '(?).*"+CAMPAIGN_NAME_PART+".*' AND campaign.status = ENABLED AND metrics.clicks >= "+MINIMUM_CLICKS+"");
   }
 
   while (report.hasNext()){
@@ -74,10 +71,10 @@ function main() {
   if (FILTER_BY_LABEL_OR_BY_NAME_PART == "Label"){
     try {
       var label = AdsApp.search("SELECT label.resource_name FROM label WHERE label.name = '"+CAMPAIGN_LABEL+"'").next().label.resourceName;
-      report = AdsApp.search("SELECT search_term_view.search_term, campaign.name FROM search_term_view WHERE campaign.advertising_channel_type = SHOPPING AND campaign.labels CONTAINS ANY ('"+label+"') AND campaign.status = ENABLED AND segments.date DURING "+PERIOD+"");      
+      report = AdsApp.search("SELECT search_term_view.search_term, campaign.name FROM search_term_view WHERE campaign.advertising_channel_type = SHOPPING AND campaign.labels CONTAINS ANY ('"+label+"') AND campaign.status = ENABLED AND metrics.clicks >= "+MINIMUM_CLICKS+"");      
     } catch (e) {}
   } else if (FILTER_BY_LABEL_OR_BY_NAME_PART == "Name"){
-    report = AdsApp.search("SELECT search_term_view.search_term, campaign.name FROM search_term_view WHERE campaign.advertising_channel_type = SHOPPING AND campaign.name REGEXP_MATCH '(?i).*"+CAMPAIGN_NAME_PART+".*' AND campaign.status = ENABLED AND segments.date DURING "+PERIOD+"");
+    report = AdsApp.search("SELECT search_term_view.search_term, campaign.name FROM search_term_view WHERE campaign.advertising_channel_type = SHOPPING AND campaign.name REGEXP_MATCH '(?).*"+CAMPAIGN_NAME_PART+".*' AND campaign.status = ENABLED AND metrics.clicks >= "+MINIMUM_CLICKS+"");
   }
 
   while (report.hasNext()){
